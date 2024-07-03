@@ -3,6 +3,7 @@
 # Minta token bot dan chat ID dari pengguna
 read -p "Masukkan Token Bot Telegram Anda: " TOKEN_TELEGRAM
 read -p "Masukkan Token Akses DO: " TOKEN_DO
+read -p "Masukkan Admin ID: " admin
 
 # Perbarui paket dan instal Python3-pip jika belum ada
 apt-get update
@@ -30,6 +31,8 @@ TOKEN = '${TOKEN_TELEGRAM}'
 # Masukkan token API DigitalOcean Anda di sini
 DO_TOKEN = '${TOKEN_DO}'
 
+allowed_admin_chat_ids = [${admin}]  # Ganti dengan ChatID admin Anda
+
 # URL endpoint untuk membuat droplet di DigitalOcean
 DO_DROPLET_URL = 'https://api.digitalocean.com/v2/droplets'
 
@@ -38,6 +41,9 @@ ROOT_PASSWORD = '@1Vpsbysan'
 
 # Inisialisasi objek bot
 bot = telebot.TeleBot(TOKEN)
+
+# List ChatID admin yang diizinkan
+allowed_admin_chat_ids = [576495165]  # Ganti dengan ChatID admin Anda
 
 # Dictionary untuk memetakan opsi ukuran dengan kode ukuran DigitalOcean yang sesuai
 size_options = {
@@ -52,7 +58,32 @@ size_options = {
 # Dictionary untuk menyimpan nama droplet yang diinput oleh pengguna
 user_data = {}
 
-@bot.message_handler(commands=['create'])
+@bot.message_handler(commands=['start'])
+def handle_start(message):
+    chat_id = message.chat.id
+    if chat_id in allowed_admin_chat_ids:
+        # Membuat InlineKeyboardMarkup untuk tombol CREATE dan DELETE
+        start_keyboard = InlineKeyboardMarkup(row_width=2)
+        create_button = InlineKeyboardButton(text='CREATE', callback_data='start_create')
+        delete_button = InlineKeyboardButton(text='DELETE', callback_data='start_delete')
+        start_keyboard.add(create_button, delete_button)
+        
+        bot.send_message(chat_id, 'Silakan pilih tindakan:', reply_markup=start_keyboard)
+    else:
+        bot.send_message(chat_id, 'Anda tidak diizinkan untuk mengakses bot ini.')
+
+@bot.callback_query_handler(func=lambda call: call.data.startswith('start_'))
+def handle_start_callback(call: CallbackQuery):
+    chat_id = call.message.chat.id
+    if chat_id in allowed_admin_chat_ids:
+        if call.data == 'start_create':
+            request_droplet_name(call.message)
+        elif call.data == 'start_delete':
+            bot.send_message(chat_id, 'Masukkan ID Droplet yang ingin dihapus:')
+            bot.register_next_step_handler(call.message, process_delete_droplet)
+    else:
+        bot.send_message(chat_id, 'Anda tidak diizinkan untuk melakukan tindakan ini.')
+
 def request_droplet_name(message):
     chat_id = message.chat.id
     bot.send_message(chat_id, 'Masukkan nama droplet:')
@@ -144,19 +175,14 @@ def delete_droplet(droplet_id):
     response = requests.delete(url, headers=headers)
     return response.status_code == 204
 
-# Handler untuk menerima perintah /delete_droplet
-@bot.message_handler(commands=['delete'])
-def handle_delete_droplet(message):
-    try:
-        # Memecah pesan untuk mendapatkan ID droplet
-        droplet_id = message.text.split()[1]
-        # Menghapus droplet dan memberikan balasan
-        if delete_droplet(droplet_id):
-            bot.reply_to(message, f"Droplet dengan ID {droplet_id} berhasil dihapus.")
-        else:
-            bot.reply_to(message, f"Droplet dengan ID {droplet_id} tidak ditemukan atau gagal dihapus.")
-    except IndexError:
-        bot.reply_to(message, "Format perintah salah. Gunakan /delete_droplet <DROPLET_ID>.")
+# Fungsi untuk memproses penghapusan droplet setelah menerima ID
+def process_delete_droplet(message):
+    chat_id = message.chat.id
+    droplet_id = message.text.strip()
+    if delete_droplet(droplet_id):
+        bot.send_message(chat_id, f"Droplet dengan ID {droplet_id} berhasil dihapus.")
+    else:
+        bot.send_message(chat_id, f"Droplet dengan ID {droplet_id} tidak ditemukan atau gagal dihapus.")
 
 # Start bot polling
 bot.polling()
